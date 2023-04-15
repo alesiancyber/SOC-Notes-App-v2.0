@@ -2,13 +2,14 @@ import re
 import sys
 from PyQt5 import QtWidgets, QtGui, QtCore
 from ipaddress import ip_address, IPv4Address, IPv6Address
+from PyQt5.QtWidgets import QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QTextEdit, QMessageBox, QListWidget
 from spellchecker import SpellChecker  # Import the SpellChecker class
 import json
-
+import os
+from datetime import datetime
 
 class NumberKeyPressedSignal(QtCore.QObject):
     number_key_pressed = QtCore.pyqtSignal(int)
-
 
 class CustomPlainTextEdit(QtWidgets.QPlainTextEdit):
     def __init__(self, parent=None):
@@ -73,51 +74,105 @@ class MainWindow(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
 
-        # Create input and output boxes
-        self.input_box = CustomInputBox()  # Use the new CustomInputBox class
-        self.output_box = CustomPlainTextEdit(self)
+        self.setWindowTitle('Notes App')
+        self.setGeometry(100, 100, 1200, 800)
 
-        # Create search results list widget
-        self.search_results_list = QtWidgets.QListWidget()
-        self.search_results_list.itemDoubleClicked.connect(self.insert_search_result)
-        self.search_results_list.setFixedSize(200, 175)
+        # Set up layout
+        main_layout = QVBoxLayout()
+        top_layout = QHBoxLayout()
+        middle_layout = QHBoxLayout()
+        bottom_layout = QHBoxLayout()
 
-        # Create button to generate markdown table
-        self.generate_button = QtWidgets.QPushButton("Generate Table")
-        self.generate_button.clicked.connect(self.generate_table)
+        # Add QLineEdit fields for customer name, alert name, and alert link
+        self.customer_name_input = QLineEdit(self)
+        self.customer_name_input.setPlaceholderText('Customer Name')
+        top_layout.addWidget(self.customer_name_input)
 
-        # Create button to clear boxes
-        self.clear_button = QtWidgets.QPushButton("Clear")
+        self.alert_name_input = QLineEdit(self)
+        self.alert_name_input.setPlaceholderText('Alert Name')
+        top_layout.addWidget(self.alert_name_input)
+
+        self.alert_link_input = QLineEdit(self)
+        self.alert_link_input.setPlaceholderText('Alert Link')
+        top_layout.addWidget(self.alert_link_input)
+
+        main_layout.addLayout(top_layout)  # Move the top_layout here
+
+        # Add the input box
+        self.input_box = QTextEdit(self)
+        main_layout.addWidget(self.input_box)
+
+        # Add buttons for building table, clearing, parsing JSON, and saving to file
+        self.build_table_button = QPushButton('Build Table', self)
+        middle_layout.addWidget(self.build_table_button)
+        self.build_table_button.clicked.connect(self.build_table)
+
+        self.clear_button = QPushButton('Clear', self)
+        middle_layout.addWidget(self.clear_button)
         self.clear_button.clicked.connect(self.clear_boxes)
 
-        # Create a button to parse JSON
-        self.parse_json_button = QtWidgets.QPushButton("Parse JSON")
+        self.parse_json_button = QPushButton('Parse JSON', self)
+        middle_layout.addWidget(self.parse_json_button)
         self.parse_json_button.clicked.connect(self.parse_json)
 
-        # Create layout and add widgets
-        layout = QtWidgets.QHBoxLayout()
-        left_layout = QtWidgets.QVBoxLayout()
-        left_layout.addWidget(QtWidgets.QLabel("Input Data:"))
-        left_layout.addWidget(self.input_box)
-        left_layout.addWidget(self.generate_button)
-        left_layout.addWidget(self.clear_button)
-        left_layout.addWidget(QtWidgets.QLabel("Output Table:"))
-        left_layout.addWidget(self.output_box)
-        left_layout.addWidget(self.parse_json_button)
-        self.output_box.number_key_signal = NumberKeyPressedSignal()
-        self.output_box.number_key_signal.number_key_pressed.connect(self.select_search_result_by_number)
+        self.save_button = QPushButton('Save', self)
+        middle_layout.addWidget(self.save_button)
+        self.save_button.clicked.connect(self.save_to_file)
 
-        layout.addLayout(left_layout)
-        layout.addWidget(self.search_results_list)
+        # Add the output box and search results list widget
+        self.output_box = CustomPlainTextEdit(self)
+        bottom_layout.addWidget(self.output_box)
 
+        self.search_results_list = QListWidget(self)
+        bottom_layout.addWidget(self.search_results_list)
+        self.search_results_list.itemDoubleClicked.connect(self.insert_search_result)
 
-        self.setLayout(layout)
+        # Add the layouts to the main layout
+        main_layout.addLayout(middle_layout)
+        main_layout.addLayout(bottom_layout)
+
+        # Set the main layout
+        self.setLayout(main_layout)
 
         # Initialize data and content lists
         self.data = []
         self.content = []
         self.from_keyboard = False
         self.json_object = None
+
+    def save_to_file(self):
+        try:
+            customer_name = self.customer_name_input.text().strip()
+            alert_name = self.alert_name_input.text().strip()
+            alert_link = self.alert_link_input.text().strip()
+
+            if not customer_name or not alert_name or not alert_link:
+                QMessageBox.warning(self, "Warning", "Please fill in all required fields.")
+                return
+
+            # Create the directories if they don't exist
+            documents_folder = os.path.expanduser("~/Documents")
+            case_files_folder = os.path.join(documents_folder, "Case Files")
+            month_year_folder = os.path.join(case_files_folder, f"{datetime.now().strftime('%B %Y')}")
+
+            for folder in [case_files_folder, month_year_folder]:
+                if not os.path.exists(folder):
+                    os.makedirs(folder)
+
+            # Save the file
+            output_text = self.output_box.toPlainText()
+            file_content = f"{alert_link}\n\n{output_text}"
+            file_name = f"{customer_name}_{alert_name}_{datetime.now().strftime('%m-%d-%Y')}.md"
+            file_path = os.path.join(month_year_folder, file_name)
+
+            with open(file_path, "w") as file:
+                file.write(file_content)
+
+            QMessageBox.information(self, "Success", f"File saved at {file_path}")
+        except Exception as e:
+            import traceback
+            print("Error in save_to_file:", traceback.format_exc())
+            QMessageBox.critical(self, "Error", "An error occurred while saving the file.")
 
     def parse_json(self):
         json_string = self.input_box.toPlainText()
@@ -140,7 +195,7 @@ class MainWindow(QtWidgets.QWidget):
                 new_path = list(path)
                 new_path.append(key)
                 if search_term.lower() in str(key).lower():
-                    result = f"{'.'.join(map(str, new_path))}: {value}"
+                    result = (f"{'.'.join(map(str, new_path))[5:]}", value)
                     results.append(result)
                 results.extend(self.search_json(value, search_term, new_path))
         elif isinstance(json_obj, list):
@@ -149,11 +204,23 @@ class MainWindow(QtWidgets.QWidget):
                 new_path.append(i)
                 results.extend(self.search_json(value, search_term, new_path))
         else:
-            if search_term.lower() in str(json_obj).lower():
-                result = f"{'.'.join(map(str, path))}: {json_obj}"
+            if search_term.lower() == str(json_obj).lower():
+                result = (f"{'.'.join(map(str, path))[5:]}", json_obj)
                 results.append(result)
 
         return results
+
+    def get_json_value(self, json_obj, keys):
+        current_value = json_obj
+        for key in keys:
+            try:
+                key = int(key)
+            except ValueError:
+                pass
+
+            current_value = current_value[key]
+
+        return current_value
 
     def clear_boxes(self):
         self.input_box.clear()
@@ -175,10 +242,17 @@ class MainWindow(QtWidgets.QWidget):
         json_search_results = []
         if self.json_object is not None:
             json_search_results = self.search_json(self.json_object, search_term)
-            json_search_results = [f"JSON: {result}" for result in json_search_results]
+            json_search_results = [result[1] for result in json_search_results]
 
         # Combine markdown table and JSON search results
         combined_results = md_search_results + json_search_results
+
+        # Add numbering to JSON results and limit combined results to 9
+        combined_results = combined_results[:9]
+        json_index_offset = len(md_search_results)
+        for i, result in enumerate(json_search_results):
+            if json_index_offset + i < 9:
+                combined_results[json_index_offset + i] = f"{json_index_offset + i + 1}. {result}"
 
         # Update the search results list
         if combined_results:
@@ -200,8 +274,10 @@ class MainWindow(QtWidgets.QWidget):
 
             if result_text.startswith("JSON: "):
                 result_text = result_text[6:]  # Remove the "JSON: " prefix
-                _, value = result_text.split(': ', 1)
-                self.insert_search_result(item, value.strip())
+                key_path, value = result_text.split(': ', 1)
+                keys = key_path.split('.')
+                value = self.get_json_value(self.json_object, keys)
+                self.insert_search_result(item, value)
             else:
                 self.insert_search_result(item)
 
@@ -213,33 +289,18 @@ class MainWindow(QtWidgets.QWidget):
         if item is not None:
             result_text = item.text()
 
-            if json_value is not None:
-                # Insert only the value from the JSON result
-                output_text = self.output_box.toPlainText()
-                new_output_text = output_text[:-1] + f' "{json_value}"'
-                self.output_box.setPlainText(new_output_text)
-
-            else:
-                # Remove the index number for markdown table results
-                if result_text.split('. ')[0].isdigit():
-                    result_value = result_text.split('. ')[1]
-
-                output_text = self.output_box.toPlainText()
-                new_output_text = output_text[:-1] + f' "{result_value}"'
-                self.output_box.setPlainText(new_output_text)
-
-            self.search_results_list.clear()
-
-    def insert_search_result(self, item, json_value=None):
-        if item is not None:
-            result_text = item.text()
+            if result_text.startswith("JSON: "):
+                result_text = result_text[6:]  # Remove the "JSON: " prefix
+                key_path, value = result_text.split(': ', 1)
+                keys = key_path.split('.')
+                value = self.get_json_value(self.json_object, keys)
+                json_value = value
 
             if json_value is not None:
                 # Insert only the value from the JSON result
                 output_text = self.output_box.toPlainText()
                 new_output_text = output_text[:-1] + f' "{json_value}"'
                 self.output_box.setPlainText(new_output_text)
-
             else:
                 # Remove the index number for markdown table results
                 if result_text.split('. ')[0].isdigit():
@@ -279,7 +340,7 @@ class MainWindow(QtWidgets.QWidget):
 
         return ""
 
-    def generate_table(self):
+    def build_table(self):
         # Clear output box
         self.output_box.clear()
 
