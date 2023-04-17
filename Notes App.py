@@ -7,6 +7,8 @@ from spellchecker import SpellChecker  # Import the SpellChecker class
 import json
 import os
 from datetime import datetime
+from PyQt5.QtWebEngineWidgets import QWebEngineView
+import markdown2
 
 class NumberKeyPressedSignal(QtCore.QObject):
     number_key_pressed = QtCore.pyqtSignal(int)
@@ -69,7 +71,6 @@ class CustomInputBox(QtWidgets.QPlainTextEdit):
 
             cursor.insertText(text)
 
-
 class MainWindow(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
@@ -81,6 +82,7 @@ class MainWindow(QtWidgets.QWidget):
         main_layout = QVBoxLayout()
         top_layout = QHBoxLayout()
         middle_layout = QHBoxLayout()
+        button_layout = QHBoxLayout()
         bottom_layout = QHBoxLayout()
 
         # Add QLineEdit fields for customer name, alert name, and alert link
@@ -96,28 +98,37 @@ class MainWindow(QtWidgets.QWidget):
         self.alert_link_input.setPlaceholderText('Alert Link')
         top_layout.addWidget(self.alert_link_input)
 
-        main_layout.addLayout(top_layout)  # Move the top_layout here
+        main_layout.addLayout(top_layout)
 
         # Add the input box
         self.input_box = QTextEdit(self)
-        main_layout.addWidget(self.input_box)
+        middle_layout.addWidget(self.input_box)
+
+        # Add the HTML view
+        self.html_view = QWebEngineView(self)
+        self.html_view.setMinimumSize(400, 300)
+        middle_layout.addWidget(self.html_view)
+
+        main_layout.addLayout(middle_layout)
 
         # Add buttons for building table, clearing, parsing JSON, and saving to file
         self.build_table_button = QPushButton('Build Table', self)
-        middle_layout.addWidget(self.build_table_button)
+        button_layout.addWidget(self.build_table_button)
         self.build_table_button.clicked.connect(self.build_table)
 
         self.clear_button = QPushButton('Clear', self)
-        middle_layout.addWidget(self.clear_button)
+        button_layout.addWidget(self.clear_button)
         self.clear_button.clicked.connect(self.clear_boxes)
 
         self.parse_json_button = QPushButton('Parse JSON', self)
-        middle_layout.addWidget(self.parse_json_button)
+        button_layout.addWidget(self.parse_json_button)
         self.parse_json_button.clicked.connect(self.parse_json)
 
         self.save_button = QPushButton('Save', self)
-        middle_layout.addWidget(self.save_button)
+        button_layout.addWidget(self.save_button)
         self.save_button.clicked.connect(self.save_to_file)
+
+        main_layout.addLayout(button_layout)
 
         # Add the output box and search results list widget
         self.output_box = CustomPlainTextEdit(self)
@@ -127,8 +138,6 @@ class MainWindow(QtWidgets.QWidget):
         bottom_layout.addWidget(self.search_results_list)
         self.search_results_list.itemDoubleClicked.connect(self.insert_search_result)
 
-        # Add the layouts to the main layout
-        main_layout.addLayout(middle_layout)
         main_layout.addLayout(bottom_layout)
 
         # Set the main layout
@@ -139,6 +148,42 @@ class MainWindow(QtWidgets.QWidget):
         self.content = []
         self.from_keyboard = False
         self.json_object = None
+
+        # Connect the textChanged signal to update_html_view
+        self.output_box.textChanged.connect(self.update_html_view)
+
+    def update_html_view(self):
+        markdown_text = self.output_box.toPlainText()
+        html = markdown2.markdown(markdown_text, extras=["tables", "fenced-code-blocks"])
+        html = f"""<!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                table {{
+                    border-collapse: collapse;
+                }}
+                th, td {{
+                    border: 1px solid black;
+                    padding: 8px;
+                    text-align: left;
+                }}
+                th {{
+                    background-color: #f2f2f2;
+                }}
+                pre {{
+                    background-color: #f8f8f8;
+                    border: 1px solid #cccccc;
+                    border-radius: 3px;
+                    padding: 6px 10px;
+                }}
+            </style>
+        </head>
+        <body>
+            {html}
+        </body>
+        </html>
+        """
+        self.html_view.setHtml(html)
 
     def save_to_file(self):
         try:
@@ -184,30 +229,22 @@ class MainWindow(QtWidgets.QWidget):
             self.output_box.setPlainText("Invalid JSON string.")
             self.json_object = None
 
-    def search_json(self, json_obj, search_term, path=None):
-        if path is None:
-            path = []
-
+    def search_json(self, obj, search_term):
         results = []
 
-        if isinstance(json_obj, dict):
-            for key, value in json_obj.items():
-                new_path = list(path)
-                new_path.append(key)
-                if search_term.lower() in str(key).lower():
-                    result = (f"{'.'.join(map(str, new_path))[5:]}", value)
-                    results.append(result)
-                results.extend(self.search_json(value, search_term, new_path))
-        elif isinstance(json_obj, list):
-            for i, value in enumerate(json_obj):
-                new_path = list(path)
-                new_path.append(i)
-                results.extend(self.search_json(value, search_term, new_path))
-        else:
-            if search_term.lower() == str(json_obj).lower():
-                result = (f"{'.'.join(map(str, path))[5:]}", json_obj)
-                results.append(result)
+        def _search(obj, path):
+            if isinstance(obj, dict):
+                for key, value in obj.items():
+                    new_path = path + [key]
+                    if search_term.lower() in key.lower():  # Search for the search term as a substring in the key
+                        results.append((new_path, value))
+                    _search(value, new_path)
+            elif isinstance(obj, list):
+                for index, item in enumerate(obj):
+                    new_path = path + [index]
+                    _search(item, new_path)
 
+        _search(obj, [])
         return results
 
     def get_json_value(self, json_obj, keys):
@@ -229,30 +266,29 @@ class MainWindow(QtWidgets.QWidget):
 
     def handle_colon_search(self):
         output_text = self.output_box.toPlainText()
-        search_term = output_text.lower().split(':')[-1].strip()
 
-        # Search markdown table
+        # Extract the search term
+        search_term_pattern = r'([\w]+)\s*:'
+        search_term_match = re.search(search_term_pattern, output_text.lower())
+        if search_term_match:
+            search_term = search_term_match.group(1)
+        else:
+            search_term = ""
+
+        # Search data for the search term
         md_search_results = [
-            f"{i + 1}. {content}"
-            for i, (data, content) in enumerate(zip(self.data, self.content))
-            if search_term in data.lower()
+            content for data, content in zip(self.data, self.content) if search_term in data.lower()
         ]
 
-        # Search JSON object
-        json_search_results = []
+        # Search JSON for the search term
         if self.json_object is not None:
             json_search_results = self.search_json(self.json_object, search_term)
             json_search_results = [result[1] for result in json_search_results]
+        else:
+            json_search_results = []
 
         # Combine markdown table and JSON search results
         combined_results = md_search_results + json_search_results
-
-        # Add numbering to JSON results and limit combined results to 9
-        combined_results = combined_results[:9]
-        json_index_offset = len(md_search_results)
-        for i, result in enumerate(json_search_results):
-            if json_index_offset + i < 9:
-                combined_results[json_index_offset + i] = f"{json_index_offset + i + 1}. {result}"
 
         # Update the search results list
         if combined_results:
@@ -289,13 +325,6 @@ class MainWindow(QtWidgets.QWidget):
         if item is not None:
             result_text = item.text()
 
-            if result_text.startswith("JSON: "):
-                result_text = result_text[6:]  # Remove the "JSON: " prefix
-                key_path, value = result_text.split(': ', 1)
-                keys = key_path.split('.')
-                value = self.get_json_value(self.json_object, keys)
-                json_value = value
-
             if json_value is not None:
                 # Insert only the value from the JSON result
                 output_text = self.output_box.toPlainText()
@@ -311,38 +340,44 @@ class MainWindow(QtWidgets.QWidget):
                 self.output_box.setPlainText(new_output_text)
 
             self.search_results_list.clear()
+            self.output_box.setPlainText(new_output_text)
 
     def handle_search_result_selected(self, item):
         self.insert_search_result(item)
 
     def generate_hyperlink(self, content):
-        url = "https://www.virustotal.com/gui/search/"
         label = "Reputation Check"
 
         # Check if content is a valid IPv4 or IPv6 address
         try:
             ip = ip_address(content)
-            if isinstance(ip, IPv4Address) or isinstance(ip, IPv6Address):
-                return f"[{label}]({url}{content})"
+            if isinstance(ip, ipaddress.IPv4Address) or isinstance(ip, ipaddress.IPv6Address):
+                url = f"https://www.virustotal.com/gui/ip-address/{content}/detection"
+                return f"[{label}]({url})"
         except ValueError:
             pass
 
-        # Check if content is a valid SHA256
-        if re.fullmatch(r"[A-Fa-f0-9]{64}", content):
-            return f"[{label}]({url}{content})"
+        # Check if content is a valid SHA256, SHA1, or MD5 hash
+        if re.fullmatch(r"[A-Fa-f0-9]{64}|[A-Fa-f0-9]{40}|[A-Fa-f0-9]{32}", content):
+            url = f"https://www.virustotal.com/gui/file/{content}/detection"
+            return f"[{label}]({url})"
 
         # Check if content is a valid domain
         domain_pattern = r"(?i)(?:https?://)?(?:www\.)?([\w.-]+\.[A-Za-z]{2,})"
         match = re.match(domain_pattern, content)
         if match:
             domain = match.group(1)
-            return f"[{label}]({url}{domain})"
+            url = f"https://www.virustotal.com/gui/domain/{domain}/detection"
+            return f"[{label}]({url})"
 
         return ""
 
     def build_table(self):
         # Clear output box
         self.output_box.clear()
+        self.search_results_list.clear()
+        self.data.clear()
+        self.content.clear()
 
         # Split input text into lines and generate markdown table
         lines = self.input_box.toPlainText().split('\n')
@@ -367,6 +402,7 @@ class MainWindow(QtWidgets.QWidget):
 
         # Set focus to the output box
         self.output_box.setFocus()
+
 
 
 if __name__ == "__main__":
