@@ -137,6 +137,7 @@ class MainWindow(QtWidgets.QWidget):
         self.search_results_list = QListWidget(self)
         bottom_layout.addWidget(self.search_results_list)
         self.search_results_list.itemDoubleClicked.connect(self.insert_search_result)
+        self.search_results_list.setMaximumSize(200, 200)
 
         main_layout.addLayout(bottom_layout)
 
@@ -148,12 +149,27 @@ class MainWindow(QtWidgets.QWidget):
         self.content = []
         self.from_keyboard = False
         self.json_object = None
+        self.json_objects = []
 
         # Connect the textChanged signal to update_html_view
         self.output_box.textChanged.connect(self.update_html_view)
 
+    def is_json(self, data):
+        try:
+            json.loads(data)
+        except ValueError:
+            return False
+        return True
+
     def update_html_view(self):
         markdown_text = self.output_box.toPlainText()
+
+        # Split the text by the delimiter and only process the Markdown part
+        delimiter = "---JSON---"
+        if delimiter in markdown_text:
+            markdown_text = markdown_text.split(delimiter)[0]
+
+        # Continue with the existing code to render the Markdown text as HTML
         html = markdown2.markdown(markdown_text, extras=["tables", "fenced-code-blocks"])
         html = f"""<!DOCTYPE html>
         <html>
@@ -220,13 +236,42 @@ class MainWindow(QtWidgets.QWidget):
             QMessageBox.critical(self, "Error", "An error occurred while saving the file.")
 
     def parse_json(self):
-        json_string = self.input_box.toPlainText()
-        try:
-            self.json_object = json.loads(json_string)
-            pretty_json = json.dumps(self.json_object, indent=4)
-            self.output_box.setPlainText(pretty_json)
-        except json.JSONDecodeError:
-            self.output_box.setPlainText("Invalid JSON string.")
+        # Initialize json_objects as an empty list in the __init__ method
+        self.json_objects = []
+
+        # Split input text into lines
+        lines = self.input_box.toPlainText().split('\n')
+
+        # Define the regex pattern for JSON data
+        pattern = r'\{.*\}'
+
+        # Iterate through lines and parse JSON data if found
+        for line in lines:
+            json_match = re.search(pattern, line)
+            if json_match and self.is_json(json_match.group(0)):
+                json_object = json.loads(json_match.group(0))
+                self.json_objects.append(json_object)
+
+        if not self.json_objects:
+            QtWidgets.QMessageBox.warning(self, "Invalid JSON", "No valid JSON string found in the input box.")
+
+        # Update the output box with the parsed JSON data
+        combined_text = self.output_box.toPlainText().split('---JSON---')[0]  # Extract the markdown table
+
+        json_data = ""
+        for json_object in self.json_objects:
+            formatted_json = json.dumps(json_object, indent=4)
+            json_data += f"\n{formatted_json}"
+
+        if json_data:
+            combined_text += f"\n---JSON---{json_data}\n---JSON---"
+
+        self.output_box.setPlainText(combined_text)
+
+        # Update the self.json_object for searching
+        if len(self.json_objects) > 0:
+            self.json_object = self.json_objects[0]
+        else:
             self.json_object = None
 
     def search_json(self, obj, search_term):
@@ -275,9 +320,19 @@ class MainWindow(QtWidgets.QWidget):
         else:
             search_term = ""
 
+        # Extract data and content from the output text
+        table_lines = output_text.strip().split('\n')[2:]
+        data_content_pairs = []
+        for line in table_lines:
+            line_parts = line.split('|')
+            if len(line_parts) >= 3:
+                data = line_parts[1].strip().lower()
+                content = line_parts[2].strip()
+                data_content_pairs.append((data, content))
+
         # Search data for the search term
         md_search_results = [
-            content for data, content in zip(self.data, self.content) if search_term in data.lower()
+            content for data, content in data_content_pairs if search_term in data
         ]
 
         # Search JSON for the search term
@@ -288,7 +343,7 @@ class MainWindow(QtWidgets.QWidget):
             json_search_results = []
 
         # Combine markdown table and JSON search results
-        combined_results = md_search_results + json_search_results
+        combined_results = [f"{i + 1}. {result}" for i, result in enumerate(md_search_results + json_search_results)]
 
         # Update the search results list
         if combined_results:
@@ -325,11 +380,18 @@ class MainWindow(QtWidgets.QWidget):
         if item is not None:
             result_text = item.text()
 
+            # Check if the result is from the JSON search
             if json_value is not None:
                 # Insert only the value from the JSON result
                 output_text = self.output_box.toPlainText()
                 new_output_text = output_text[:-1] + f' "{json_value}"'
                 self.output_box.setPlainText(new_output_text)
+
+                # Update the markdown table (self.data and self.content)
+                # Get the key path from the result_text
+                key_path = result_text.split(': ')[0]
+                self.data.append(key_path.lower())
+                self.content.append(json_value)
             else:
                 # Remove the index number for markdown table results
                 if result_text.split('. ')[0].isdigit():
@@ -373,26 +435,49 @@ class MainWindow(QtWidgets.QWidget):
         return ""
 
     def build_table(self):
-        # Clear output box
-        self.output_box.clear()
-        self.search_results_list.clear()
-        self.data.clear()
-        self.content.clear()
+        input_text = self.input_box.toPlainText().strip()
+        lines = re.split("\n+", input_text)
 
-        # Split input text into lines and generate markdown table
-        lines = self.input_box.toPlainText().split('\n')
-        markdown_table = "| Data | Content | Link |\n| ---- | ------- | ---- |\n"
+        new_table = "| Data | Content | Link |\n| --- | --- | --- |\n"
 
-        for i in range(0, len(lines), 2):
-            if i + 1 < len(lines):
-                data, content = lines[i], lines[i + 1]
-                self.data.append(data)
-                self.content.append(content)
-                link = self.generate_hyperlink(content)
-                markdown_table += f"| {data} | {content} | {link} |\n"
+        i = 0
+        while i < len(lines):
+            if not lines[i].strip():  # Skip empty lines
+                i += 1
+                continue
 
-        # Update output box with markdown table
-        self.output_box.setPlainText(markdown_table)
+            if "{" in lines[i] and "}" in lines[i]:  # Skip lines containing JSON data
+                i += 1
+                continue
+
+            data = lines[i].strip()
+            i += 1
+
+            content = lines[i].strip() if i < len(lines) and lines[i].strip() else ""
+            i += 1
+
+            link = ""
+            # placeholder for regex
+            if False:  # Replace this condition with the appropriate regex checks
+                link = f"[Reputation Check](https://www.virustotal.com/gui/search/{content})"
+
+            new_table += f"| {data} | {content} | {link} |\n"
+
+        # Extract existing table and separate it from the rest of the contents in the output box
+        output_text = self.output_box.toPlainText()
+        table_pattern = r'(^|\n)(\| Data \| Content \| Link \|\n\| --- \| --- \| --- \|)((\n\|.*\|.*\|.*\|)*)'
+        table_match = re.search(table_pattern, output_text)
+        if table_match:
+            existing_table = table_match.group(0)
+            rest_of_contents = output_text.replace(existing_table, '', 1)
+        else:
+            rest_of_contents = output_text
+
+        # Combine the rebuilt table with the rest of the contents
+        combined_text = f"{new_table}\n{rest_of_contents}"
+
+        # Update the output box with the combined text
+        self.output_box.setPlainText(combined_text)
 
         # Add a blank line after the table and set the cursor position
         cursor = self.output_box.textCursor()
@@ -402,7 +487,6 @@ class MainWindow(QtWidgets.QWidget):
 
         # Set focus to the output box
         self.output_box.setFocus()
-
 
 
 if __name__ == "__main__":
