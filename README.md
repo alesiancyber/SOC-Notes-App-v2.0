@@ -5,8 +5,8 @@ My Idea for a SOC notes app but switching from tkinter to PyQt5 to support some 
 
 ### Current Features:
 - Formats markdown table based on newline character (it ignores empty lines) splitting them into  | data | content |
-  - Example: user /n test would be: | user | test |  |
-- SHA 256, IPv4 & IPv6, and domains prefixed with http(s):// in the conten column will have a link column that is hyperlinked to the VT detection page for that item.
+  - Example: user /n test would be: | user | test |  | <-- empty column explained below
+- SHA 256, IPv4 & IPv6, and Domains prefixed with http(s):// in the content column will have a link column that is hyperlinked to the VT detection page for that item.
   - hyperlink is in format | reputation check |
 - Indexes the markdown table and JSON data and allows searching based on a colon (:) keypress
 - Autocomplete: search results list is numbered and pressing the number will insert that value in the format of {user: "test"} which searched "user" and returned "test" to the search results list box.
