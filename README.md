@@ -14,11 +14,11 @@ My Idea for a SOC notes app but switching from tkinter to PyQt5 to support some 
 - Save to file C:\Users\***\Documents\Case Files. Format: Customer_name_Alert_Name_mm-dd-yyyy
 - Parses Json and stores key:value for searching with colon keypress
 - Has a markdown renderer that displays what content should render like in a markdown supported environment
+  - Excludes parse Json data from being shown in the render
 
 
 
 #### Future changes/Roadmap (in order of future implementation)
-- Excluding json from the html render of the markdown (the notes preview feature)
 - Right Click for spell check suggestions
 - Append selected json values from autocomplete list to the markdown table
 - Export to PDF
