@@ -43,9 +43,10 @@ class CustomPlainTextEdit(QtWidgets.QPlainTextEdit):
         excluded_matches = [match for match in re.finditer(excluded_pattern, text)]
         excluded_ranges = [(match.start(), match.end()) for match in excluded_matches]
 
-        words = re.findall(r'\b\w+\b', text)
-        for word in words:
-            start_pos = text.find(word)
+        words = re.finditer(r'\b\w+\b', text)
+        for match in words:
+            word = match.group(0)
+            start_pos = match.start()
             in_excluded_range = any(start <= start_pos < end for start, end in excluded_ranges)
             if not in_excluded_range and self.spell_checker.unknown([word]):
                 red_underline = QtGui.QTextCharFormat()
@@ -56,6 +57,35 @@ class CustomPlainTextEdit(QtWidgets.QPlainTextEdit):
                 cursor.setPosition(start_pos, QtGui.QTextCursor.MoveAnchor)
                 cursor.setPosition(end_pos, QtGui.QTextCursor.KeepAnchor)
                 cursor.setCharFormat(red_underline)
+
+    def contextMenuEvent(self, event):
+        # Create the default context menu
+        menu = self.createStandardContextMenu()
+
+        # Get the cursor position and selected text
+        cursor = self.textCursor()
+        selected_text = cursor.selectedText()
+
+        # Get spelling suggestions
+        suggestions = self.spell_checker.candidates(selected_text)
+
+        # If there are suggestions, add them to the context menu
+        if suggestions:
+            # Add a separator before the suggestions
+            menu.addSeparator()
+
+            # Add suggestions to the context menu
+            for suggestion in suggestions:
+                action = QtWidgets.QAction(suggestion, menu)
+                action.triggered.connect(lambda _, s=suggestion: self.replace_misspelled_word(s))
+                menu.addAction(action)
+
+        # Show the context menu
+        menu.exec_(event.globalPos())
+
+    def replace_misspelled_word(self, suggestion):
+        cursor = self.textCursor()
+        cursor.insertText(suggestion)
 
 class CustomInputBox(QtWidgets.QPlainTextEdit):
     def __init__(self, parent=None):
@@ -487,7 +517,6 @@ class MainWindow(QtWidgets.QWidget):
 
         # Set focus to the output box
         self.output_box.setFocus()
-
 
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
