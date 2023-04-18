@@ -26,7 +26,7 @@ My Idea for a SOC notes app but switching from tkinter to PyQt5 to support some 
 - Packaged as self contained program using py installer
 
 ##### Notes
-- I user curly brackets "{}" to identify the json to keep it from being overwritten, if you use curly brackets it will be identified as JSON data and may prompt an error.
+- I use curly brackets "{}" to identify the json to keep it from being overwritten, if you use curly brackets it will be identified as JSON data and may prompt an error.
 - HTML render currently supports code blocks (``` ```) but the code block support is buggy. and the text can expand beyond the borders. Its on my fix list but is not
 a priority
 - I do want to support syntax highlighting in the codeblocks but unsure of its usefulness, not putting it on the roadmap for now until i make a determination
