@@ -11,7 +11,7 @@ My Idea for a SOC notes app but switching from tkinter to PyQt5 to support some 
 - Indexes the markdown table and JSON data and allows searching based on a colon (:) keypress
 - Autocomplete: search results list is numbered and pressing the number will insert that value in the format of {user: "test"} which searched "user" and returned "test" to the search results list box.
 - Has red underlining for spell check
-- Save to file C:\Users\***\\Documents\Case Files. Format: Customer_name_Alert_Name_mm-dd-yyyy
+- Save to file C:\Users\%%%\Documents\Case Files. Format: Customer_name_Alert_Name_mm-dd-yyyy
 - Parses Json and stores key:value for searching with colon keypress
 - Has a markdown renderer that displays what content should render like in a markdown supported environment
   - Excludes parse Json data from being shown in the render
