@@ -15,11 +15,12 @@ My Idea for a SOC notes app but switching from tkinter to PyQt5 to support some 
 - Parses Json and stores key:value for searching with colon keypress
 - Has a markdown renderer that displays what content should render like in a markdown supported environment
   - Excludes parse Json data from being shown in the render
+ - Spell Correction via pyspell checker. You can highlight misspelled words and right click for suggestions
 
 
 
 #### Future changes/Roadmap (in order of future implementation)
-- Right Click for spell check suggestions
+
 - Append selected json values from autocomplete list to the markdown table
 - Export to PDF
 - Support Images/screenshots
