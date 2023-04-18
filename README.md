@@ -1,7 +1,7 @@
 # SOC-Notes-App-v2.0
 My Idea for a SOC notes app but switching from tkinter to PyQt5 to support some features that were not available in tkinter due to limited graphics support.
 
-# SOC-Notes-App-v2.0
+---------------------------------
 
 ### Current Features:
 - Formats markdown table based on newline character (it ignores empty lines) splitting them into  | data | content |
