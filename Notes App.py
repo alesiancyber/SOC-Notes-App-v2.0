@@ -2,104 +2,124 @@ import re
 import sys
 from PyQt5 import QtWidgets, QtGui, QtCore
 from ipaddress import ip_address, IPv4Address, IPv6Address
-from PyQt5.QtWidgets import QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QTextEdit, QMessageBox, QListWidget
+from PyQt5.QtWidgets import QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QTextEdit, QMessageBox, QListWidget, QApplication, QMenu
 from spellchecker import SpellChecker  # Import the SpellChecker class
 import json
 import os
 from datetime import datetime
 from PyQt5.QtWebEngineWidgets import QWebEngineView
 import markdown2
+from PyQt5.QtGui import QTextCursor, QSyntaxHighlighter, QTextCharFormat, QColor
+from PyQt5.QtCore import Qt, QRect
 
-class NumberKeyPressedSignal(QtCore.QObject):
-    number_key_pressed = QtCore.pyqtSignal(int)
+class SpellCheckHighlighter(QSyntaxHighlighter):
+    def __init__(self, parent=None):
+        super(SpellCheckHighlighter, self).__init__(parent)
+        self.spell_checker = SpellChecker()
+
+    def highlightBlock(self, text):
+        text = text.strip()
+        if text:
+            words = self.spell_checker.split_words(text)
+            for word in words:
+                if self.spell_checker.unknown([word]):
+                    format = QTextCharFormat()
+                    format.setUnderlineColor(QColor(Qt.red))
+                    format.setUnderlineStyle(QTextCharFormat.SpellCheckUnderline)
+                    index = text.index(word)
+                    self.setFormat(index, len(word), format)
 
 class CustomPlainTextEdit(QtWidgets.QPlainTextEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.spell_checker = SpellChecker()  # Initialize the spell checker
-        self.setMouseTracking(True)
-        self.setAcceptDrops(False)
+        self.spell_check_highlighter = SpellCheckHighlighter(self.document())
+        self.colon_pressed = False  # Add a flag to track the colon keypress
 
     def keyPressEvent(self, event):
-        super().keyPressEvent(event)
+        stripped_text = ""
+
         if event.text() == ':':
-            self.parent().handle_colon_search()
-        elif event.text().isdigit():
-            self.parent().from_keyboard = True
-            self.parent().select_search_result_by_number(int(event.text()))
+            super().keyPressEvent(event)
+            self.colon_pressed = True
 
-        self.highlight_misspelled_words()  # Highlight misspelled words after every keypress
+            cursor_position = self.textCursor().position()
+            input_text = self.toPlainText()
 
-    def highlight_misspelled_words(self):
-        cursor = self.textCursor()
-        cursor.select(QtGui.QTextCursor.Document)
-        cursor.setCharFormat(QtGui.QTextCharFormat())
-        cursor.clearSelection()
+            # Extract the word before the colon using regex
+            match = re.search(r'(\S+)\s*:$', input_text[:cursor_position])
+            if match:
+                stripped_text = match.group(1)
+            else:
+                stripped_text = ""
 
-        # Find misspelled words and apply red underline
-        text = self.toPlainText()
-        # Exclude markdown table rows and content within double quotes
-        excluded_pattern = r"(?:(?<=\|).*?(?=\|))|(\"[^\"]*\")"
-        excluded_matches = [match for match in re.finditer(excluded_pattern, text)]
-        excluded_ranges = [(match.start(), match.end()) for match in excluded_matches]
+            print(f"Stripped text: {stripped_text}")
+            self.parent().search_key_value_pairs(stripped_text)
 
-        words = re.finditer(r'\b\w+\b', text)
-        for match in words:
-            word = match.group(0)
-            start_pos = match.start()
-            in_excluded_range = any(start <= start_pos < end for start, end in excluded_ranges)
-            if not in_excluded_range and self.spell_checker.unknown([word]):
-                red_underline = QtGui.QTextCharFormat()
-                red_underline.setUnderlineColor(QtCore.Qt.red)
-                red_underline.setUnderlineStyle(QtGui.QTextCharFormat.SpellCheckUnderline)
+            cursor_position = self.textCursor().position()
+            print(f"Cursor position: {cursor_position}")
 
-                end_pos = start_pos + len(word)
-                cursor.setPosition(start_pos, QtGui.QTextCursor.MoveAnchor)
-                cursor.setPosition(end_pos, QtGui.QTextCursor.KeepAnchor)
-                cursor.setCharFormat(red_underline)
+            # Get the position of the beginning of the current line
+            current_line_position = input_text.rfind('\n', 0, cursor_position)
+            if current_line_position == -1:
+                current_line_position = 0
+            print(f"Current line position: {current_line_position}")
+
+            # Get the position of the last colon in the current line
+            last_colon_position = input_text.rfind(':', current_line_position, cursor_position)
+            print(f"Last colon position: {last_colon_position}")
+
+            # Get the position of the last space before the colon
+            last_space_position = input_text.rfind(' ', current_line_position, last_colon_position)
+            print(f"Last space position: {last_space_position}")
+
+            if last_space_position == -1:
+                stripped_text = input_text[current_line_position:last_colon_position].strip()
+            else:
+                stripped_text = input_text[last_space_position + 1:last_colon_position].strip()
+            print(f"Stripped text: {stripped_text}")
+            if stripped_text:  # Add this line
+                self.parent().search_key_value_pairs(stripped_text)
+        elif event.text().isdigit() and self.colon_pressed:  # Check if the colon key was pressed
+            index = int(event.text())
+            self.parent().select_search_result_by_number(index)
+            self.colon_pressed = False  # Reset the flag
+            return
+        else:
+            self.colon_pressed = False  # Reset the flag if any other key is pressed
+            super().keyPressEvent(event)
+            if stripped_text:
+                self.parent().search_key_value_pairs(stripped_text)
 
     def contextMenuEvent(self, event):
-        # Create the default context menu
         menu = self.createStandardContextMenu()
 
-        # Get the cursor position and selected text
-        cursor = self.textCursor()
-        selected_text = cursor.selectedText()
+        # Get the cursor position and the word under the cursor
+        cursor = self.cursorForPosition(event.pos())
+        cursor.select(QtGui.QTextCursor.WordUnderCursor)
+        selected_word = cursor.selectedText()
 
-        # Get spelling suggestions
-        suggestions = self.spell_checker.candidates(selected_text)
+        # Check if the word is misspelled
+        if self.spell_check_highlighter.spell_checker.unknown([selected_word]):
+            suggestions = self.spell_check_highlighter.spell_checker.candidates(selected_word)
+            if suggestions:
+                menu.insertSeparator(menu.actions()[0])
+                for suggestion in suggestions:
+                    action = QtWidgets.QAction(suggestion, self)
+                    action.triggered.connect(lambda _, s=suggestion, c=cursor: self.replace_word(c, s))
+                    menu.insertAction(menu.actions()[0], action)
+            else:
+                no_suggestions_action = QtWidgets.QAction("No suggestions", self)
+                no_suggestions_action.setEnabled(False)
+                menu.insertSeparator(menu.actions()[0])
+                menu.insertAction(menu.actions()[0], no_suggestions_action)
 
-        # If there are suggestions, add them to the context menu
-        if suggestions:
-            # Add a separator before the suggestions
-            menu.addSeparator()
-
-            # Add suggestions to the context menu
-            for suggestion in suggestions:
-                action = QtWidgets.QAction(suggestion, menu)
-                action.triggered.connect(lambda _, s=suggestion: self.replace_misspelled_word(s))
-                menu.addAction(action)
-
-        # Show the context menu
         menu.exec_(event.globalPos())
 
-    def replace_misspelled_word(self, suggestion):
-        cursor = self.textCursor()
-        cursor.insertText(suggestion)
-
-class CustomInputBox(QtWidgets.QPlainTextEdit):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-
-    def insertFromMimeData(self, source):
-        if source.hasText():
-            text = source.text()
-            cursor = self.textCursor()
-
-            if not cursor.atBlockStart():
-                cursor.insertBlock()
-
-            cursor.insertText(text)
+    def replace_word(self, cursor, new_word):
+        cursor.beginEditBlock()
+        cursor.removeSelectedText()
+        cursor.insertText(new_word)
+        cursor.endEditBlock()
 
 class MainWindow(QtWidgets.QWidget):
     def __init__(self):
@@ -163,10 +183,11 @@ class MainWindow(QtWidgets.QWidget):
         # Add the output box and search results list widget
         self.output_box = CustomPlainTextEdit(self)
         bottom_layout.addWidget(self.output_box)
+        self.output_box.textChanged.connect(self.preview_output)  # Add this line
 
         self.search_results_list = QListWidget(self)
         bottom_layout.addWidget(self.search_results_list)
-        self.search_results_list.itemDoubleClicked.connect(self.insert_search_result)
+        self.search_results_list.itemDoubleClicked.connect(self.display_search_results)
         self.search_results_list.setMaximumSize(200, 200)
 
         main_layout.addLayout(bottom_layout)
@@ -174,62 +195,60 @@ class MainWindow(QtWidgets.QWidget):
         # Set the main layout
         self.setLayout(main_layout)
 
-        # Initialize data and content lists
-        self.data = []
-        self.content = []
-        self.from_keyboard = False
-        self.json_object = None
-        self.json_objects = []
+        self.key_value_pairs = {}
+        self.json_key_value_pairs = {}
+        self.selected_search_result = None
+        # Add the output box and search results list widget
 
-        # Connect the textChanged signal to update_html_view
-        self.output_box.textChanged.connect(self.update_html_view)
+    def clear_boxes(self):
+        self.input_box.clear()
+        self.output_box.clear()
+        self.search_results_list.clear()
+        self.customer_name_input.clear()
+        self.alert_name_input.clear()
+        self.alert_link_input.clear()
+        self.key_value_pairs = {}
+        self.json_key_value_pairs = {}
+        self.selected_search_result = None
 
-    def is_json(self, data):
-        try:
-            json.loads(data)
-        except ValueError:
-            return False
-        return True
+    def preview_output(self):
+        current_output = self.output_box.toPlainText()
 
-    def update_html_view(self):
-        markdown_text = self.output_box.toPlainText()
+        # Remove content within ---JSON--- tags
+        current_output = re.sub(r'---JSON---(?:.|\n)*?---JSON---', '', current_output)
 
-        # Split the text by the delimiter and only process the Markdown part
-        delimiter = "---JSON---"
-        if delimiter in markdown_text:
-            markdown_text = markdown_text.split(delimiter)[0]
+        html = markdown2.markdown(current_output, extras=["tables", "fenced-code-blocks"])
 
-        # Continue with the existing code to render the Markdown text as HTML
-        html = markdown2.markdown(markdown_text, extras=["tables", "fenced-code-blocks"])
-        html = f"""<!DOCTYPE html>
-        <html>
-        <head>
-            <style>
+        html_with_css = f"""
+                <style>
+                /* Add your custom CSS styles here */
+                pre {{
+                    white-space: pre-wrap;
+                }}
                 table {{
                     border-collapse: collapse;
+                    width: 100%;
                 }}
                 th, td {{
                     border: 1px solid black;
                     padding: 8px;
                     text-align: left;
                 }}
-                th {{
-                    background-color: #f2f2f2;
+                /* Custom CSS for code blocks */
+                pre code {{
+                    display: block;
+                    overflow-x: auto;
+                    white-space: pre;  /* Changed from nowrap to pre */
+                    border: 1px solid #ccc;
+                    padding: 1em;
+                    background-color: #f5f5f5;  /* Background color added */
+                    border-radius: 4px;
                 }}
-                pre {{
-                    background-color: #f8f8f8;
-                    border: 1px solid #cccccc;
-                    border-radius: 3px;
-                    padding: 6px 10px;
-                }}
-            </style>
-        </head>
-        <body>
-            {html}
-        </body>
-        </html>
-        """
-        self.html_view.setHtml(html)
+                </style>
+                {html}
+                """
+
+        self.html_view.setHtml(html_with_css)
 
     def save_to_file(self):
         try:
@@ -265,261 +284,153 @@ class MainWindow(QtWidgets.QWidget):
             print("Error in save_to_file:", traceback.format_exc())
             QMessageBox.critical(self, "Error", "An error occurred while saving the file.")
 
-    def parse_json(self):
-        # Initialize json_objects as an empty list in the __init__ method
-        self.json_objects = []
-
-        # Split input text into lines
-        lines = self.input_box.toPlainText().split('\n')
-
-        # Define the regex pattern for JSON data
-        pattern = r'\{.*\}'
-
-        # Iterate through lines and parse JSON data if found
-        for line in lines:
-            json_match = re.search(pattern, line)
-            if json_match and self.is_json(json_match.group(0)):
-                json_object = json.loads(json_match.group(0))
-                self.json_objects.append(json_object)
-
-        if not self.json_objects:
-            QtWidgets.QMessageBox.warning(self, "Invalid JSON", "No valid JSON string found in the input box.")
-
-        # Update the output box with the parsed JSON data
-        combined_text = self.output_box.toPlainText().split('---JSON---')[0]  # Extract the markdown table
-
-        json_data = ""
-        for json_object in self.json_objects:
-            formatted_json = json.dumps(json_object, indent=4)
-            json_data += f"\n{formatted_json}"
-
-        if json_data:
-            combined_text += f"\n---JSON---{json_data}\n---JSON---"
-
-        self.output_box.setPlainText(combined_text)
-
-        # Update the self.json_object for searching
-        if len(self.json_objects) > 0:
-            self.json_object = self.json_objects[0]
-        else:
-            self.json_object = None
-
-    def search_json(self, obj, search_term):
-        results = []
-
-        def _search(obj, path):
-            if isinstance(obj, dict):
-                for key, value in obj.items():
-                    new_path = path + [key]
-                    if search_term.lower() in key.lower():  # Search for the search term as a substring in the key
-                        results.append((new_path, value))
-                    _search(value, new_path)
-            elif isinstance(obj, list):
-                for index, item in enumerate(obj):
-                    new_path = path + [index]
-                    _search(item, new_path)
-
-        _search(obj, [])
-        return results
-
-    def get_json_value(self, json_obj, keys):
-        current_value = json_obj
-        for key in keys:
-            try:
-                key = int(key)
-            except ValueError:
-                pass
-
-            current_value = current_value[key]
-
-        return current_value
-
-    def clear_boxes(self):
-        self.input_box.clear()
-        self.output_box.clear()
+    def display_search_results(self, results):
         self.search_results_list.clear()
+        self.selected_search_result = results
+        print(f"Search results: {self.selected_search_result}")
 
-    def handle_colon_search(self):
-        output_text = self.output_box.toPlainText()
+        for i, result in enumerate(results):
+            result_text = f"{i + 1}. {result[1]}"
+            print(f"Adding result to list: {result_text}")
+            self.search_results_list.addItem(result_text)
 
-        # Extract the search term
-        search_term_pattern = r'([\w]+)\s*:'
-        search_term_match = re.search(search_term_pattern, output_text.lower())
-        if search_term_match:
-            search_term = search_term_match.group(1)
+    def select_search_result_by_number(self, index):
+        if self.selected_search_result and 0 < index <= len(self.selected_search_result):
+            selected_result = self.selected_search_result[index - 1]
+            self.insert_selected_result_text(selected_result[1])
+            self.clear_search_results()  # Clear search results after selecting a result
         else:
-            search_term = ""
+            print("Invalid index or no search results available.")
 
-        # Extract data and content from the output text
-        table_lines = output_text.strip().split('\n')[2:]
-        data_content_pairs = []
-        for line in table_lines:
-            line_parts = line.split('|')
-            if len(line_parts) >= 3:
-                data = line_parts[1].strip().lower()
-                content = line_parts[2].strip()
-                data_content_pairs.append((data, content))
+    def clear_search_results(self):
+        self.search_results_list.clear()
+        self.selected_search_result = None
 
-        # Search data for the search term
-        md_search_results = [
-            content for data, content in data_content_pairs if search_term in data
-        ]
+    def insert_selected_result_text(self, result_text):
+        cursor = self.output_box.textCursor()
+        cursor.insertText(f' "{result_text}"')
 
-        # Search JSON for the search term
-        if self.json_object is not None:
-            json_search_results = self.search_json(self.json_object, search_term)
-            json_search_results = [result[1] for result in json_search_results]
+    def search_key_value_pairs(self, search_term):
+        print(f"Search term: {search_term}")
+
+        # Search non-JSON key-value pairs
+        non_json_results = [(key, value[0]) for key, value in self.key_value_pairs.items() if
+                            search_term.lower() in key.lower()]
+
+        # Search JSON key-value pairs
+        json_results = [(key, value) for key, value in self.json_key_value_pairs.items() if
+                        search_term.lower() in key.lower()]
+
+        # Combine both search results
+        results = non_json_results + json_results
+        print(f"Search results: {results}")
+
+        self.display_search_results(results)
+
+    def parse_json(self):
+        input_text = self.input_box.toPlainText()
+
+        # 1. Recognize JSON objects enclosed in curly brackets using regex
+        json_objects = re.findall(r'\{.*?\}', input_text, flags=re.DOTALL)
+
+        # 2. Parse and store key-value pairs in a dictionary
+        self.json_key_value_pairs = {}
+        for json_object in json_objects:
+            try:
+                json_data = json.loads(json_object)
+                self.json_key_value_pairs.update(json_data)
+            except json.JSONDecodeError:
+                QMessageBox.warning(self, "Invalid JSON", f"The following JSON object is invalid: {json_object}")
+
+        print(f"JSON Key-Value Pairs: {self.json_key_value_pairs}")  # Debugging print statement
+
+        # 3. Display the parsed JSON in the output box between ---JSON--- tags
+        formatted_json = json.dumps(self.json_key_value_pairs, indent=2)
+        output_text = f"\n\n---JSON---\n{formatted_json}\n---JSON---"
+        current_output = self.output_box.toPlainText()
+        if current_output:
+            self.output_box.setPlainText(current_output + "\n" + output_text)
         else:
-            json_search_results = []
+            self.output_box.setPlainText(output_text)
 
-        # Combine markdown table and JSON search results
-        combined_results = [f"{i + 1}. {result}" for i, result in enumerate(md_search_results + json_search_results)]
-
-        # Update the search results list
-        if combined_results:
-            self.search_results_list.clear()
-            self.search_results_list.addItems(combined_results)
-        else:
-            self.search_results_list.clear()
-
-        # Update the connection for the itemDoubleClicked signal
-        self.search_results_list.itemDoubleClicked.disconnect()
-        self.search_results_list.itemDoubleClicked.connect(
-            lambda item: self.insert_search_result(item, None)
-        )
-
-    def select_search_result_by_number(self, num):
-        if num > 0 and num <= self.search_results_list.count():
-            item = self.search_results_list.item(num - 1)
-            result_text = item.text()
-
-            if result_text.startswith("JSON: "):
-                result_text = result_text[6:]  # Remove the "JSON: " prefix
-                key_path, value = result_text.split(': ', 1)
-                keys = key_path.split('.')
-                value = self.get_json_value(self.json_object, keys)
-                self.insert_search_result(item, value)
-            else:
-                self.insert_search_result(item)
-
-            if self.from_keyboard:
-                self.output_box.moveCursor(QtGui.QTextCursor.End)
-                self.from_keyboard = False
-
-    def insert_search_result(self, item, json_value=None):
-        if item is not None:
-            result_text = item.text()
-
-            # Check if the result is from the JSON search
-            if json_value is not None:
-                # Insert only the value from the JSON result
-                output_text = self.output_box.toPlainText()
-                new_output_text = output_text[:-1] + f' "{json_value}"'
-                self.output_box.setPlainText(new_output_text)
-
-                # Update the markdown table (self.data and self.content)
-                # Get the key path from the result_text
-                key_path = result_text.split(': ')[0]
-                self.data.append(key_path.lower())
-                self.content.append(json_value)
-            else:
-                # Remove the index number for markdown table results
-                if result_text.split('. ')[0].isdigit():
-                    result_value = result_text.split('. ')[1]
-
-                output_text = self.output_box.toPlainText()
-                new_output_text = output_text[:-1] + f' "{result_value}"'
-                self.output_box.setPlainText(new_output_text)
-
-            self.search_results_list.clear()
-            self.output_box.setPlainText(new_output_text)
-
-    def handle_search_result_selected(self, item):
-        self.insert_search_result(item)
-
-    def generate_hyperlink(self, content):
-        label = "Reputation Check"
-
-        # Check if content is a valid IPv4 or IPv6 address
+    def is_domain_ip_or_sha256(self, value):
         try:
-            ip = ip_address(content)
-            if isinstance(ip, ipaddress.IPv4Address) or isinstance(ip, ipaddress.IPv6Address):
-                url = f"https://www.virustotal.com/gui/ip-address/{content}/detection"
-                return f"[{label}]({url})"
+            ip = ip_address(value)
+            return ip.is_global
         except ValueError:
             pass
 
-        # Check if content is a valid SHA256, SHA1, or MD5 hash
-        if re.fullmatch(r"[A-Fa-f0-9]{64}|[A-Fa-f0-9]{40}|[A-Fa-f0-9]{32}", content):
-            url = f"https://www.virustotal.com/gui/file/{content}/detection"
-            return f"[{label}]({url})"
+        if re.match(r'http[s]?://', value):
+            return True
 
-        # Check if content is a valid domain
-        domain_pattern = r"(?i)(?:https?://)?(?:www\.)?([\w.-]+\.[A-Za-z]{2,})"
-        match = re.match(domain_pattern, content)
-        if match:
-            domain = match.group(1)
-            url = f"https://www.virustotal.com/gui/domain/{domain}/detection"
-            return f"[{label}]({url})"
+        # Check for SHA-256 hash
+        if re.match(r'^[A-Fa-f0-9]{64}$', value):
+            return True
 
-        return ""
+        return False
 
     def build_table(self):
-        input_text = self.input_box.toPlainText().strip()
-        lines = re.split("\n+", input_text)
+        # Save the current cursor position
+        current_cursor_position = self.output_box.textCursor().position()
 
-        new_table = "| Data | Content | Link |\n| --- | --- | --- |\n"
+        # Move the cursor to the beginning of the text
+        self.output_box.moveCursor(QtGui.QTextCursor.Start)
+        input_text = self.input_box.toPlainText()
 
-        i = 0
-        while i < len(lines):
-            if not lines[i].strip():  # Skip empty lines
-                i += 1
-                continue
+        # Remove text between curly brackets
+        input_text = re.sub(r'\{[^}]*\}', '', input_text)
 
-            if "{" in lines[i] and "}" in lines[i]:  # Skip lines containing JSON data
-                i += 1
-                continue
+        # Split the input text by lines
+        lines = input_text.split('\n')
 
-            data = lines[i].strip()
-            i += 1
+        # Ignore empty lines
+        non_empty_lines = [line for line in lines if line.strip() != '']
 
-            content = lines[i].strip() if i < len(lines) and lines[i].strip() else ""
-            i += 1
+        # Store new key-value pairs
+        new_key_value_pairs = {}
+        for i in range(0, len(non_empty_lines) - 1, 2):
+            key = non_empty_lines[i]
+            value = non_empty_lines[i + 1]
 
-            link = ""
-            # placeholder for regex
-            if False:  # Replace this condition with the appropriate regex checks
-                link = f"[Reputation Check](https://www.virustotal.com/gui/search/{content})"
+            # Check if the value is a domain, public IPv4, IPv6, URL with http:// or https://, or SHA-256 hash
+            if self.is_domain_ip_or_sha256(value):
+                new_key_value_pairs[key] = (value, "Reputation Check")
+            else:
+                new_key_value_pairs[key] = (value, "")
 
-            new_table += f"| {data} | {content} | {link} |\n"
+            # Update the existing key_value_pairs dictionary
+        for key, value in new_key_value_pairs.items():
+            self.key_value_pairs[key] = value  # Update this line
 
-        # Extract existing table and separate it from the rest of the contents in the output box
-        output_text = self.output_box.toPlainText()
-        table_pattern = r'(^|\n)(\| Data \| Content \| Link \|\n\| --- \| --- \| --- \|)((\n\|.*\|.*\|.*\|)*)'
-        table_match = re.search(table_pattern, output_text)
-        if table_match:
-            existing_table = table_match.group(0)
-            rest_of_contents = output_text.replace(existing_table, '', 1)
-        else:
-            rest_of_contents = output_text
+        # Generate the markdown table
+        table_header = "| Data | Content | Link |\n|------|---------|------|\n"
+        table_rows = []
+        for key, value in self.key_value_pairs.items():
+            content = re.sub(r'(?:http(s)?://)?(?:www\.)?', '', value[0])
+            link = f"https://www.virustotal.com/gui/search/{content}"
+            table_rows.append(f"| {key} | {content} | [{value[1]}]({link}) |")
 
-        # Combine the rebuilt table with the rest of the contents
-        combined_text = f"{new_table}\n{rest_of_contents}"
+        new_markdown_table = table_header + '\n'.join(table_rows)
 
-        # Update the output box with the combined text
-        self.output_box.setPlainText(combined_text)
+        # Remove the existing table (if exists) from the output
+        existing_table_pattern = r'\| Data \| Content \| Link \|\n\|------\|---------\|------\|.*?(?=\n\n|$)'
+        existing_table = re.search(existing_table_pattern, self.output_box.toPlainText(), flags=re.DOTALL)
+        if existing_table:
+            self.output_box.setPlainText(
+                re.sub(existing_table_pattern, '', self.output_box.toPlainText(), flags=re.DOTALL))
 
-        # Add a blank line after the table and set the cursor position
-        cursor = self.output_box.textCursor()
-        cursor.movePosition(QtGui.QTextCursor.End)
-        cursor.insertBlock()
-        self.output_box.setTextCursor(cursor)
+        # Insert the table at the beginning of the output box
+        self.output_box.insertPlainText(new_markdown_table + "\n\n")
 
-        # Set focus to the output box
-        self.output_box.setFocus()
+        # Restore the cursor position
+        new_cursor_position = self.output_box.textCursor()
+        new_cursor_position.setPosition(current_cursor_position + len(new_markdown_table) + 2)
+        self.output_box.setTextCursor(new_cursor_position)
 
-if __name__ == "__main__":
-    app = QtWidgets.QApplication(sys.argv)
+        self.preview_output()
+
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
     main_window = MainWindow()
     main_window.show()
     sys.exit(app.exec_())
