@@ -13,7 +13,7 @@ My Idea for a SOC notes app but switching from tkinter to PyQt5 to support some 
 - Has red underlining for spell check
 - Save to file C:\Users \ %%%\Documents\Case Files. Format: Customer_name_Alert_Name_mm-dd-yyyy
 - Parses Json and stores key:value for searching with colon keypress
-- Has a markdown renderer that displays what content should render like in a markdown supported environment
+- Has a markdown renderer that displays what content should render like in a markdown supported environment (fenced code blocks and tables)
   - Excludes parse Json data from being shown in the render
  - Spell Correction via pyspell checker. You can highlight misspelled words and right click for suggestions
 
@@ -28,6 +28,4 @@ My Idea for a SOC notes app but switching from tkinter to PyQt5 to support some 
 
 ##### Notes
 - I use curly brackets "{}" to identify the json to keep it from being overwritten, if you use curly brackets it will be identified as JSON data and may prompt an error.
-- HTML render currently supports code blocks (``` ```) but the code block support is buggy. and the text can expand beyond the borders. Its on my fix list but is not
-a priority
 - I do want to support syntax highlighting in the codeblocks but unsure of its usefulness, not putting it on the roadmap for now until i make a determination
