@@ -2,7 +2,8 @@ import re
 import sys
 from PyQt5 import QtWidgets, QtGui, QtCore
 from ipaddress import ip_address, IPv4Address, IPv6Address
-from PyQt5.QtWidgets import QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QTextEdit, QMessageBox, QListWidget, QApplication, QMenu
+from PyQt5.QtWidgets import QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QTextEdit, QMessageBox, QListWidget, \
+    QApplication, QMenu, QPlainTextEdit
 from spellchecker import SpellChecker  # Import the SpellChecker class
 import json
 import os
@@ -11,6 +12,7 @@ from PyQt5.QtWebEngineWidgets import QWebEngineView
 import markdown2
 from PyQt5.QtGui import QTextCursor, QSyntaxHighlighter, QTextCharFormat, QColor
 from PyQt5.QtCore import Qt, QRect
+import string
 
 class SpellCheckHighlighter(QSyntaxHighlighter):
     def __init__(self, parent=None):
@@ -19,6 +21,18 @@ class SpellCheckHighlighter(QSyntaxHighlighter):
 
     def highlightBlock(self, text):
         text = text.strip()
+
+        # Ignore JSON
+        if text.startswith("---JSON---"):
+            return
+
+        # Ignore Markdown tables
+        if text.startswith("|"):
+            return
+
+        # Ignore text within quotes
+        text = re.sub(r'".*?"', '', text)
+
         if text:
             words = self.spell_checker.split_words(text)
             for word in words:
@@ -121,6 +135,7 @@ class CustomPlainTextEdit(QtWidgets.QPlainTextEdit):
         cursor.insertText(new_word)
         cursor.endEditBlock()
 
+
 class MainWindow(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
@@ -151,7 +166,7 @@ class MainWindow(QtWidgets.QWidget):
         main_layout.addLayout(top_layout)
 
         # Add the input box
-        self.input_box = QTextEdit(self)
+        self.input_box = QPlainTextEdit(self)
         middle_layout.addWidget(self.input_box)
 
         # Add the HTML view
@@ -198,7 +213,10 @@ class MainWindow(QtWidgets.QWidget):
         self.key_value_pairs = {}
         self.json_key_value_pairs = {}
         self.selected_search_result = None
-        # Add the output box and search results list widget
+
+    def input_box_text_changed(self):
+        print("Input box text changed:")
+        print(repr(self.input_box.toPlainText()))
 
     def clear_boxes(self):
         self.input_box.clear()
@@ -330,8 +348,8 @@ class MainWindow(QtWidgets.QWidget):
     def parse_json(self):
         input_text = self.input_box.toPlainText()
 
-        # 1. Recognize JSON objects enclosed in curly brackets using regex
-        json_objects = re.findall(r'\{.*?\}', input_text, flags=re.DOTALL)
+        # 1. Recognize JSON objects using a custom function
+        json_objects = self.extract_json_objects(input_text)
 
         # 2. Parse and store key-value pairs in a dictionary
         self.json_key_value_pairs = {}
@@ -352,6 +370,23 @@ class MainWindow(QtWidgets.QWidget):
             self.output_box.setPlainText(current_output + "\n" + output_text)
         else:
             self.output_box.setPlainText(output_text)
+
+    def extract_json_objects(self, text):
+        json_objects = []
+        open_brackets = 0
+        start_index = -1
+
+        for i, char in enumerate(text):
+            if char == '{':
+                if open_brackets == 0:
+                    start_index = i
+                open_brackets += 1
+            elif char == '}':
+                open_brackets -= 1
+                if open_brackets == 0:
+                    json_objects.append(text[start_index:i + 1])
+
+        return json_objects
 
     def is_domain_ip_or_sha256(self, value):
         try:
@@ -386,29 +421,28 @@ class MainWindow(QtWidgets.QWidget):
         # Ignore empty lines
         non_empty_lines = [line for line in lines if line.strip() != '']
 
-        # Store new key-value pairs
-        new_key_value_pairs = {}
+        # Store key-value pairs
+        self.key_value_pairs = {}  # Change this line
         for i in range(0, len(non_empty_lines) - 1, 2):
             key = non_empty_lines[i]
             value = non_empty_lines[i + 1]
 
             # Check if the value is a domain, public IPv4, IPv6, URL with http:// or https://, or SHA-256 hash
             if self.is_domain_ip_or_sha256(value):
-                new_key_value_pairs[key] = (value, "Reputation Check")
+                self.key_value_pairs[key] = (value, "Reputation Check")  # Change this line
             else:
-                new_key_value_pairs[key] = (value, "")
-
-            # Update the existing key_value_pairs dictionary
-        for key, value in new_key_value_pairs.items():
-            self.key_value_pairs[key] = value  # Update this line
+                self.key_value_pairs[key] = (value, "")  # Change this line
 
         # Generate the markdown table
         table_header = "| Data | Content | Link |\n|------|---------|------|\n"
         table_rows = []
         for key, value in self.key_value_pairs.items():
             content = re.sub(r'(?:http(s)?://)?(?:www\.)?', '', value[0])
-            link = f"https://www.virustotal.com/gui/search/{content}"
-            table_rows.append(f"| {key} | {content} | [{value[1]}]({link}) |")
+            if value[1] == "Reputation Check":
+                link = f"https://www.virustotal.com/gui/search/{content}"
+                table_rows.append(f"| {key} | {content} | [{value[1]}]({link}) |")
+            else:
+                table_rows.append(f"| {key} | {content} |  |")
 
         new_markdown_table = table_header + '\n'.join(table_rows)
 
