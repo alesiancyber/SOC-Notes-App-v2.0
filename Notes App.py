@@ -14,6 +14,7 @@ from PyQt5.QtGui import QTextCursor, QSyntaxHighlighter, QTextCharFormat, QColor
 from PyQt5.QtCore import Qt, QRect
 import string
 
+
 class SpellCheckHighlighter(QSyntaxHighlighter):
     def __init__(self, parent=None):
         super(SpellCheckHighlighter, self).__init__(parent)
@@ -42,6 +43,7 @@ class SpellCheckHighlighter(QSyntaxHighlighter):
                     format.setUnderlineStyle(QTextCharFormat.SpellCheckUnderline)
                     index = text.index(word)
                     self.setFormat(index, len(word), format)
+
 
 class CustomPlainTextEdit(QtWidgets.QPlainTextEdit):
     def __init__(self, parent=None):
@@ -462,6 +464,7 @@ class MainWindow(QtWidgets.QWidget):
         self.output_box.setTextCursor(new_cursor_position)
 
         self.preview_output()
+
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
